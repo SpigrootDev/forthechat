@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="da">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="description" content="Maximilian Michalskis portfolio med projekter i dansk og mediegrafik.">
+        <title>Dashboard · Maximilian Michalski</title>
+        <link rel="stylesheet" href="style.css">
+        <script src="script.js?v=6" defer></script>
+        <script src="admin.js" defer></script>
+    </head>
+    <body data-page="dashboard">
+        <a class="skip-link" href="#main">Spring til indhold</a>
+        <header class="site-header">
+            <h1>MAXIMILIAN MICHALSKI</h1>
+            <p class="site-subtitle">Portfolio</p>
+            <nav aria-label="Hovedmenu">
+                <a href="index.html" data-page="home">HOME</a>
+                <a href="dansk.html" data-page="dansk">DANSK</a>
+                <a href="mediegrafiker.html" data-page="mediegrafiker">MEDIEGRAFIKER</a>
+                <a href="login.html" data-auth-link>LOGIN</a>
+                <button type="button" class="nav-logout" data-logout hidden>LOG UD</button>
+            </nav>
+        </header>
+        <main id="main" class="container">
+            <section class="card page-intro">
+                <p class="eyebrow">DIT ARBEJDSOMRÅDE</p>
+                <h2>Dashboard</h2>
+                <p>Upload et projekt, og vælg hvor det skal vises.</p>
+                <div class="dashboard-stats">
+                    <span>Projekter i alt: <strong id="total-count">0</strong></span>
+                    <span><strong id="dansk-count">0</strong> i dansk</span>
+                    <span><strong id="media-count">0</strong> i mediegrafiker</span>
+                </div>
+            </section>
+            <nav class="tabs" aria-label="Dashboard-sektioner">
+                <button type="button" class="button button-secondary" data-tab="projects" aria-pressed="true">Projekter</button>
+                <button type="button" class="button button-secondary" data-tab="look" aria-pressed="false">Udseende</button>
+                <button type="button" class="button button-secondary" data-tab="inbox" aria-pressed="false">Beskeder <span id="unread-badge"></span></button>
+                <button type="button" class="button button-secondary" data-tab="stats" aria-pressed="false">Statistik</button>
+            </nav>
+            <div class="dashboard-grid" id="panel-projects" data-panel>
+                <section class="card editor" aria-labelledby="editor-title">
+                    <h2 id="editor-title">Nyt projekt</h2>
+                    <p id="editor-status" class="status" role="status"></p>
+                    <form id="project-form">
+                        <input type="hidden" id="post-id" name="id">
+                        <label for="title">Titel <span aria-hidden="true">*</span></label>
+                        <input id="title" name="title" maxlength="120" required>
+                        <div class="form-row">
+                            <div>
+                                <label for="category">Kategori</label>
+                                <select id="category" name="category">
+                                    <option value="dansk">Dansk</option>
+                                    <option value="mediegrafiker">Mediegrafiker</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="date">Dato</label>
+                                <input id="date" name="date" type="date" required>
+                            </div>
+                        </div>
+                        <label for="description">Beskrivelse</label>
+                        <textarea id="description" name="description" maxlength="20000" rows="4"></textarea>
+                        <label for="file">Projektfil
+                            <span id="file-required-mark" aria-hidden="true">*</span>
+                        </label>
+                        <input id="file" name="file" type="file"
+                            accept=".pdf,.docx,.pptx,.xlsx,.txt,.jpg,.jpeg,.png,.gif,.webp,.ai,.psd"
+                            required
+                            aria-describedby="file-help current-file">
+                        <p class="field-help" id="file-help">
+                            PDF, DOCX, PPTX, XLSX, TXT, AI eller PSD eller et billede. Maks. 20 MB.
+                        </p>
+                        <p id="current-file" class="small" hidden>
+                        </p>
+                        <label for="thumbnail">Forsidebillede
+                            <span class="muted">(valgfrit)</span>
+                        </label>
+                        <input id="thumbnail" name="thumbnail" type="file"
+                            accept="image/jpeg,image/png,image/gif,image/webp"
+                            aria-describedby="thumbnail-help">
+                        <p class="field-help" id="thumbnail-help">
+                            JPG, PNG, GIF eller WebP. Maks. 5 MB.
+                        </p>
+                        <img id="thumbnail-preview" class="thumbnail-preview" alt="Valgt forsidebillede" hidden>
+                        <label class="checkbox-label" id="remove-thumbnail-label" hidden>
+                            <input type="checkbox" name="remove_thumbnail" value="1" id="remove-thumbnail">
+                            Fjern eksisterende forsidebillede
+                        </label>
+                        <div class="form-row">
+                            <div>
+                                <label for="status">Status</label>
+                                <select id="status" name="status"><option value="published">Udgivet</option><option value="draft">Kladde (skjult)</option></select>
+                            </div>
+                            <div>
+                                <label for="publish_at">Udgiv fra <span class="muted">(valgfri)</span></label>
+                                <input id="publish_at" name="publish_at" type="date">
+                            </div>
+                        </div>
+                        <div class="actions">
+                            <button class="button" id="publish-submit" type="submit" disabled>Udgiv projekt</button>
+                            <button class="button button-secondary" id="cancel-edit" type="button" hidden>Annuller redigering</button>
+                        </div>
+                    </form >
+                    <p class="small muted">
+                       Udgivne projekter er synlige for alle besøgende.
+                    </p>
+
+                </section>
+                <section aria-labelledby="manage-heading">
+                    <div class="section-heading">
+                        <h2 id="manage-heading">Dine projekter</h2>
+                    </div>
+                    <p id="manage-status">Henter projekter…</p>
+                    <button id="retry-manage" type="button" hidden>Prøv igen</button>
+                    <div id="manage-posts">
+                    </div>
+                </section>
+            </div>
+            <section class="card" id="panel-look" data-panel hidden>
+                <h2>Udseende og tekster</h2>
+                <p class="muted">Ændringerne vises på hele hjemmesiden. Tomme eller uændrede tekster bruger standardteksten.</p>
+                <p id="look-status" class="status" role="status"></p>
+                <form id="look-form">
+                    <h3>Farver og skrift</h3>
+                    <div class="color-row">
+                        <label>Baggrund <input type="color" name="bg"></label>
+                        <label>Kort <input type="color" name="card"></label>
+                        <label>Tekst <input type="color" name="text"></label>
+                        <label>Knapper <input type="color" name="accent"></label>
+                    </div>
+                    <label for="look-font">Skrifttype</label>
+                    <select id="look-font" name="font"><option value="arial">Arial</option><option value="georgia">Georgia</option><option value="system">System</option></select>
+                    <h3>Tekster</h3>
+                    <div id="look-texts"></div>
+                    <div class="actions">
+                        <button class="button" type="submit">Gem udseende</button>
+                        <button class="button button-secondary" type="button" id="look-reset">Nulstil alt</button>
+                    </div>
+                </form>
+            </section>
+            <section class="card" id="panel-inbox" data-panel hidden>
+                <h2>Beskeder</h2>
+                <label class="checkbox-label"><input type="checkbox" id="show-archived"> Vis arkiverede</label>
+                <p id="msg-status" class="status" role="status"></p>
+                <div id="msg-list" class="manage-posts"></div>
+            </section>
+            <section class="card" id="panel-stats" data-panel hidden>
+                <h2>Statistik</h2>
+                <p id="stats-status" class="status" role="status"></p>
+                <div id="stats-body"></div>
+            </section>
+            <dialog id="delete-dialog" aria-labelledby="delete-title">
+                <h2 id="delete-title">Slet projekt?</h2>
+                <p>Er du sikker på, at du vil slette <strong id="delete-description"></strong>?</p>
+                <p id="delete-status" class="status" role="status"></p>
+                <div class="actions">
+                    <button class="button button-secondary" id="cancel-delete" type="button">Annuller</button>
+                    <button class="button" id="confirm-delete" type="button">Slet projekt</button>
+                </div>
+            </dialog>
+        </main>
+        <footer	class="site-footer">
+            <p>© 
+                <span data-year>2026</span> Maximilian Michalski · Skoleportfolio
+            </p>
+        </footer>
+        <noscript>
+            <p class="noscript">
+                Aktivér JavaScript for at vise projekter og bruge login.
+            </p>
+        </noscript>
+
+    </body>
+</html>
