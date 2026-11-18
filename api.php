@@ -2,7 +2,6 @@
 // The only PHP file. All pages and design remain HTML, CSS and JavaScript.
 declare(strict_types=1);
 const DATA_DIR = __DIR__ . '/../portfolio-data';
-const FILE_LIMIT = 20 * 1024 * 1024;
 // Login settings live outside the web root and outside git: portfolio-data/config.php returns ['user' => ..., 'hash' => password_hash(...)].
 $config = is_file(DATA_DIR . '/config.php') ? require DATA_DIR . '/config.php' : [];
 
@@ -18,39 +17,62 @@ function input(string $key): string {
     if (!is_string($value)) reply(['error' => 'Ugyldigt felt.'], 422);
     return trim($value);
 }
-function public_post(array $row): array {
+function public_post(array $row, array $extras = []): array {
     $base = 'api.php?action=file&id=' . $row['id'];
+    // The first file lives in the posts row; extra files live in project_files.
+    $files = [['name' => $row['file_name'], 'size' => (int)$row['file_size'], 'type' => $row['file_type'], 'url' => $base, 'viewUrl' => $base . '&view=1']];
+    foreach ($extras as $x) {
+        $u = $base . '&n=' . (int)$x['id'];
+        $files[] = ['name' => $x['file_name'], 'size' => (int)$x['file_size'], 'type' => $x['file_type'], 'url' => $u, 'viewUrl' => $u . '&view=1'];
+    }
     return ['id' => $row['id'], 'title' => $row['title'], 'description' => $row['description'],
         'category' => $row['category'], 'date' => $row['date'], 'fileName' => $row['file_name'],
         'fileSize' => (int)$row['file_size'], 'fileType' => $row['file_type'],
-        'fileUrl' => $base, 'viewUrl' => $base . '&view=1',
+        'fileUrl' => $base, 'viewUrl' => $base . '&view=1', 'files' => $files,
         'thumbnailUrl' => $row['thumb_key'] ? $base . '&thumbnail=1' : null,
         'status' => $row['status'] ?? 'published', 'publishAt' => $row['publish_at'] ?? null];
+}
+function extras_of(PDO $db, ?string $postId = null): array {
+    $q = $postId === null ? $db->query('SELECT * FROM project_files ORDER BY id') : $db->prepare('SELECT * FROM project_files WHERE post_id=? ORDER BY id');
+    if ($postId !== null) $q->execute([$postId]);
+    $out = [];
+    foreach ($q->fetchAll() as $r) $out[$r['post_id']][] = $r;
+    return $out;
 }
 function uploaded(string $field): bool {
     return isset($_FILES[$field]) && ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
 }
-function upload(string $field, bool $image = false): array {
-    $file = $_FILES[$field];
-    if (is_array($file['error']) || $file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) throw new RuntimeException('Uploaden mislykkedes. Kontrollér filstørrelsen.');
-    if ($file['size'] < 1 || $file['size'] > ($image ? 5 * 1024 * 1024 : FILE_LIMIT)) throw new RuntimeException($image ? 'Billedet må højst fylde 5 MB.' : 'Projektfilen må højst fylde 20 MB og må ikke være tom.');
+// Turns $_FILES['field'] (single file or files[]) into a flat list of single-file arrays.
+function normalize_files(string $field): array {
+    if (!isset($_FILES[$field])) return [];
+    $f = $_FILES[$field]; $out = [];
+    if (is_array($f['name'])) {
+        foreach ($f['name'] as $i => $n) {
+            if ($f['error'][$i] === UPLOAD_ERR_NO_FILE) continue;
+            $out[] = ['name' => $n, 'tmp_name' => $f['tmp_name'][$i], 'error' => $f['error'][$i], 'size' => $f['size'][$i]];
+        }
+    } elseif ($f['error'] !== UPLOAD_ERR_NO_FILE) $out[] = $f;
+    return $out;
+}
+function upload(array $file, bool $image = false): array {
+    if ($file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
+        $tooBig = in_array($file['error'], [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true);
+        throw new RuntimeException($tooBig ? 'Filen er større end serverens grænse. Se .user.ini.' : 'Uploaden mislykkedes (fejlkode ' . $file['error'] . ').');
+    }
+    if ($file['size'] < 1) throw new RuntimeException('Filen er tom.');
+    if ($image && $file['size'] > 5 * 1024 * 1024) throw new RuntimeException('Billedet må højst fylde 5 MB.');
     $name = substr(basename(str_replace('\\', '/', $file['name'])), 0, 200);
     $name = preg_replace('/[\x00-\x1f\x7f]/', '', $name);
-    $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-    $allowed = ['pdf' => ['application/pdf'], 'txt' => ['text/plain'],
-        'jpg' => ['image/jpeg'], 'jpeg' => ['image/jpeg'], 'png' => ['image/png'], 'gif' => ['image/gif'], 'webp' => ['image/webp'],
-        'docx' => ['application/zip', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-        'pptx' => ['application/zip', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-        'xlsx' => ['application/zip', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']];
-    if (!isset($allowed[$extension]) || !in_array($mime, $allowed[$extension], true)) throw new RuntimeException('Brug PDF, DOCX, PPTX, XLSX, TXT eller et billede.');
-    if ($image && !in_array($mime, ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) throw new RuntimeException('Forsidebilledet skal være JPG, PNG, GIF eller WebP.');
-    if (str_starts_with($mime, 'image/') && !@getimagesize($file['tmp_name'])) throw new RuntimeException('Ugyldigt billede.');
-    if (in_array($extension, ['docx', 'pptx', 'xlsx'], true)) $mime = $allowed[$extension][1];
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']) ?: 'application/octet-stream';
+    $images = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if ($image && (!in_array($mime, $images, true) || !@getimagesize($file['tmp_name']))) throw new RuntimeException('Forsidebilledet skal være JPG, PNG, GIF eller WebP.');
+    // Any file type is accepted. Only PDFs and safe image types keep their type (so they can be viewed in the browser);
+    // everything else is stored as a plain download.
+    if (!in_array($mime, array_merge($images, ['application/pdf']), true) || (in_array($mime, $images, true) && !@getimagesize($file['tmp_name']))) $mime = 'application/octet-stream';
     $key = bin2hex(random_bytes(24));
-    if (!move_uploaded_file($file['tmp_name'], DATA_DIR . '/' . $key)) throw new RuntimeException('Filen kunne ikke gemmes. Kontrollér serverens skriverettigheder.');
+    if (!move_uploaded_file($file['tmp_name'], DATA_DIR . '/' . $key)) throw new RuntimeException('Filen kunne ikke gemmes. Kontrollér serverens skriverettigheder og diskplads.');
     chmod(DATA_DIR . '/' . $key, 0600);
-    return ['key' => $key, 'name' => $name, 'type' => $mime, 'size' => (int)$file['size']];
+    return ['key' => $key, 'name' => $name !== '' ? $name : 'fil', 'type' => $mime, 'size' => (int)$file['size']];
 }
 function remove_file(?string $key): void {
     if ($key && preg_match('/^[a-f0-9]{48}$/D', $key) && is_file(DATA_DIR . '/' . $key)) unlink(DATA_DIR . '/' . $key);
@@ -68,6 +90,9 @@ try {
     $db->exec('PRAGMA busy_timeout=5000');
     $db->exec('CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, title TEXT, category TEXT, description TEXT, date TEXT, file_key TEXT, file_name TEXT, file_type TEXT, file_size INTEGER, thumb_key TEXT, thumb_type TEXT, created_at TEXT)');
     $db->exec('CREATE TABLE IF NOT EXISTS attempts (ip TEXT, time INTEGER)');
+    // Extra files of a project (the first file stays in posts.file_*, so old projects keep working).
+    $db->exec('CREATE TABLE IF NOT EXISTS project_files (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id TEXT, file_key TEXT, file_name TEXT, file_type TEXT, file_size INTEGER)');
+    $db->exec('CREATE INDEX IF NOT EXISTS project_files_post ON project_files (post_id)');
     // Migrations: safe to run on every request, existing projects are kept.
     $cols = array_column($db->query('PRAGMA table_info(posts)')->fetchAll(), 'name');
     if (!in_array('status', $cols, true)) $db->exec("ALTER TABLE posts ADD COLUMN status TEXT NOT NULL DEFAULT 'published'");
@@ -85,13 +110,19 @@ try {
         // Drafts and not-yet-published projects: only the logged-in admin may open their files.
         if ($row && ($row['status'] !== 'published' || ($row['publish_at'] ?? '') > date('Y-m-d'))) { start_session(); if (empty($_SESSION['admin'])) { http_response_code(404); exit; } session_write_close(); }
         $thumbnail = ($_GET['thumbnail'] ?? '') === '1';
-        $key = $row ? ($thumbnail ? $row['thumb_key'] : $row['file_key']) : null;
+        $n = $_GET['n'] ?? '';
+        $key = $mime = $fileName = null;
+        if ($row && $thumbnail) { $key = $row['thumb_key']; $mime = $row['thumb_type']; $fileName = 'forsidebillede'; }
+        elseif ($row && $n !== '') {
+            if (!is_string($n) || !ctype_digit($n)) { http_response_code(404); exit; }
+            $q = $db->prepare('SELECT * FROM project_files WHERE id=? AND post_id=?'); $q->execute([(int)$n, $id]); $x = $q->fetch();
+            if ($x) { $key = $x['file_key']; $mime = $x['file_type']; $fileName = $x['file_name']; }
+        } elseif ($row) { $key = $row['file_key']; $mime = $row['file_type']; $fileName = $row['file_name']; }
         if (!$key || !preg_match('/^[a-f0-9]{48}$/D', $key) || !is_file(DATA_DIR . '/' . $key)) { http_response_code(404); exit; }
-        $mime = $thumbnail ? $row['thumb_type'] : $row['file_type'];
-        $inline = $thumbnail || (($_GET['view'] ?? '') === '1' && ($mime === 'application/pdf' || str_starts_with($mime, 'image/')));
-        header('Content-Type: ' . $mime); header('X-Content-Type-Options: nosniff');
+        $inline = $thumbnail || (($_GET['view'] ?? '') === '1' && ($mime === 'application/pdf' || str_starts_with((string)$mime, 'image/')));
+        header('Content-Type: ' . ($mime ?: 'application/octet-stream')); header('X-Content-Type-Options: nosniff');
         header("Content-Security-Policy: sandbox; default-src 'none'"); header('Cache-Control: no-store');
-        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="project"; filename*=UTF-8\'\'' . rawurlencode($thumbnail ? 'forsidebillede' : $row['file_name']));
+        header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="project"; filename*=UTF-8\'\'' . rawurlencode($fileName));
         readfile(DATA_DIR . '/' . $key); exit;
     }
     start_session();
@@ -102,7 +133,8 @@ try {
     // Visitors only see published projects whose publish date has arrived; the admin sees everything.
     if ($action === 'posts') {
         $where = empty($_SESSION['admin']) ? " WHERE status='published' AND (publish_at IS NULL OR publish_at='' OR publish_at<='" . date('Y-m-d') . "')" : '';
-        reply(['posts' => array_map('public_post', $db->query('SELECT * FROM posts' . $where . ' ORDER BY date DESC, created_at DESC')->fetchAll())]);
+        $extras = extras_of($db);
+        reply(['posts' => array_map(fn($r) => public_post($r, $extras[$r['id']] ?? []), $db->query('SELECT * FROM posts' . $where . ' ORDER BY date DESC, created_at DESC')->fetchAll())]);
     }
     if ($action === 'settings') reply(['settings' => $db->query('SELECT k, v FROM settings')->fetchAll(PDO::FETCH_KEY_PAIR)]);
     if (in_array($action, ['messages', 'stats'], true)) {
@@ -172,30 +204,40 @@ try {
         if ($id !== '' && !$existing) throw new RuntimeException('Projektet findes ikke længere.');
         if ($action === 'delete') {
             if (!$existing) throw new RuntimeException('Vælg et projekt.');
+            $extraKeys = array_column(extras_of($db, $id)[$id] ?? [], 'file_key');
+            $query = $db->prepare('DELETE FROM project_files WHERE post_id=?'); $query->execute([$id]);
             $query = $db->prepare('DELETE FROM posts WHERE id=?'); $query->execute([$id]); $db->exec('COMMIT');
-            remove_file($existing['file_key']); remove_file($existing['thumb_key']); reply(['ok' => true]);
+            remove_file($existing['file_key']); remove_file($existing['thumb_key']);
+            foreach ($extraKeys as $k) remove_file($k);
+            reply(['ok' => true]);
         }
-        if (empty($_POST)) throw new RuntimeException('Uploaden er for stor til serveren. Se README.');
+        if (empty($_POST)) throw new RuntimeException('Uploaden er for stor til serveren (post_max_size). Se .user.ini.');
         $title = input('title'); $category = input('category'); $description = input('description'); $date = input('date');
         $parsed = strlen($date) === 10 ? DateTimeImmutable::createFromFormat('!Y-m-d', $date) : false;
         if (!$title || strlen($title) > 480 || strlen($description) > 20000 || !in_array($category, ['dansk', 'mediegrafiker'], true) || !$parsed || $parsed->format('Y-m-d') !== $date) throw new RuntimeException('Udfyld titel, kategori og en gyldig dato.');
-        if (!$existing && !uploaded('file')) throw new RuntimeException('Vælg en projektfil.');
-        $file = $thumb = null;
-        if (uploaded('file')) { $file = upload('file'); $newFiles[] = $file['key']; }
-        if (uploaded('thumbnail')) { $thumb = upload('thumbnail', true); $newFiles[] = $thumb['key']; }
+        // Accepts any number of files (files[]); a single 'file' field still works too.
+        $uploads = array_merge(normalize_files('files'), normalize_files('file'));
+        if (!$existing && !$uploads) throw new RuntimeException('Vælg mindst én projektfil.');
+        $saved = [];
+        foreach ($uploads as $u) { $f = upload($u); $newFiles[] = $f['key']; $saved[] = $f; }
+        $thumb = null;
+        if (uploaded('thumbnail')) { $thumb = upload($_FILES['thumbnail'], true); $newFiles[] = $thumb['key']; }
         $removeThumb = input('remove_thumbnail') === '1';
         $row = ['id' => $existing['id'] ?? bin2hex(random_bytes(16)), 'title' => $title, 'category' => $category, 'description' => $description, 'date' => $date,
-            'file_key' => $file['key'] ?? $existing['file_key'], 'file_name' => $file['name'] ?? $existing['file_name'], 'file_type' => $file['type'] ?? $existing['file_type'], 'file_size' => $file['size'] ?? $existing['file_size'],
+            'file_key' => $existing['file_key'] ?? $saved[0]['key'], 'file_name' => $existing['file_name'] ?? $saved[0]['name'], 'file_type' => $existing['file_type'] ?? $saved[0]['type'], 'file_size' => $existing['file_size'] ?? $saved[0]['size'],
             'thumb_key' => $thumb['key'] ?? ($removeThumb ? null : ($existing['thumb_key'] ?? null)), 'thumb_type' => $thumb['type'] ?? ($removeThumb ? null : ($existing['thumb_type'] ?? null)), 'created_at' => $existing['created_at'] ?? gmdate('Y-m-d\TH:i:s\Z'),
             'status' => input('status') === 'draft' ? 'draft' : 'published', 'publish_at' => preg_match('/^\d{4}-\d{2}-\d{2}$/D', input('publish_at')) ? input('publish_at') : null];
         $keys = array_keys($row);
         $query = $db->prepare('INSERT OR REPLACE INTO posts (' . implode(',', $keys) . ') VALUES (:' . implode(',:', $keys) . ')');
-        $query->execute($row); $db->exec('COMMIT');
+        $query->execute($row);
+        // New project: the first file is the main file, the rest are extras. Editing: every new file is added as an extra.
+        $ins = $db->prepare('INSERT INTO project_files (post_id, file_key, file_name, file_type, file_size) VALUES (?,?,?,?,?)');
+        foreach (($existing ? $saved : array_slice($saved, 1)) as $f) $ins->execute([$row['id'], $f['key'], $f['name'], $f['type'], $f['size']]);
+        $db->exec('COMMIT');
     } catch (Throwable $e) {
         $db->exec('ROLLBACK'); foreach ($newFiles as $key) remove_file($key);
         if ($e instanceof RuntimeException) reply(['error' => $e->getMessage()], 422); throw $e;
     }
-    if ($existing && $file) remove_file($existing['file_key']);
     if ($existing && $existing['thumb_key'] !== $row['thumb_key']) remove_file($existing['thumb_key']);
-    reply(['ok' => true, 'post' => public_post($row)]);
+    reply(['ok' => true, 'post' => public_post($row, extras_of($db, $row['id'])[$row['id']] ?? [])]);
 } catch (Throwable $e) { error_log((string)$e); reply(['error' => 'Serverfejl. Kontrollér PHP SQLite, Fileinfo og skriverettigheder.'], 500); }

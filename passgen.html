@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="da">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="description" content="Maximilian Michalskis portfolio med projekter i dansk og mediegrafik.">
+        <title>Login · Maximilian Michalski</title>
+        <link rel="stylesheet" href="style.css">
+        <script src="script.js?v=9" defer></script>
+        <style>
+            /* Embed-specific */
+            .pw-embed {
+                max-width: 560px;
+                margin: 0 auto
+            }
+        
+            .pw-logo {
+                display: block;
+                width: min(260px, 70%);
+                height: auto;
+                margin: 0 auto 1.5rem
+            }
+        
+            .pw-output {
+                display: block;
+                width: 100%;
+                border: 1px solid #c4c4c4;
+                border-radius: 4px;
+                background: var(--card);
+                color: var(--text);
+                padding: .85rem .75rem;
+                font-family: ui-monospace, Menlo, Consolas, monospace;
+                font-size: 1.15rem;
+                overflow-wrap: anywhere;
+                min-height: 3.4rem
+            }
+        
+            .pw-length {
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                margin: 1.25rem 0 .4rem;
+                font-weight: 700;
+                font-size: .95rem
+            }
+        
+            .pw-embed input[type=range] {
+                width: 100%;
+                accent-color: var(--accent);
+                margin: 0 0 .75rem
+            }
+        
+            .pw-meter {
+                height: 6px;
+                border-radius: 3px;
+                background: #e9e9e9;
+                margin-top: 1rem;
+                overflow: hidden
+            }
+        
+            .pw-meter span {
+                display: block;
+                height: 100%;
+                width: 0;
+                background: #a22525;
+                transition: width .2s, background .2s
+            }
+        
+            .pw-options {
+                margin-top: .5rem
+            }
+        </style>
+    </head>
+    <body data-page="passgen">
+        <a class="skip-link" href="#main">Spring til indhold</a>
+        <header class="site-header">
+            <h1>MAXIMILIAN MICHALSKI</h1>
+            <p class="site-subtitle">Portfolio</p>
+            <nav aria-label="Hovedmenu">
+                <a href="index.html" data-page="home">HOME</a>
+                <a href="dansk.html" data-page="dansk">DANSK</a>
+                <a href="mediegrafiker.html" data-page="mediegrafiker">MEDIEGRAFIKER</a>
+                <a href="passgen.html" data-page="passgen">PASSGEN</a>
+                <a href="login.html" data-auth-link>LOGIN</a>
+                <button type="button" class="nav-logout" data-logout hidden>LOG UD</button>
+            </nav>
+        </header>
+        <main id="main" class="container">
+            <div class="pw-embed">
+                <svg class="pw-logo" style="overflow:visible" role="img" aria-label="Pass Gen" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 310.08 93.52"><defs><style>.pl-1{font-size:109.19px}.pl-1,.pl-2,.pl-3{fill:#231f20;font-family:MyriadPro-Regular,'Myriad Pro',Arial,Helvetica,sans-serif}.pl-2{font-size:94.56px}.pl-4{fill:#2e3192}.pl-3{font-size:52.78px}</style></defs><rect class="pl-4" x="27.3" width="282.78" height="14.94"/><rect class="pl-4" x="27.3" y="78.58" width="282.78" height="14.94"/><text class="pl-2" transform="translate(32.12 19.52) rotate(90) scale(.85 1)"><tspan x="0" y="0" textLength="52" lengthAdjust="spacingAndGlyphs">S</tspan></text><text class="pl-1" transform="translate(27.3 14.94) rotate(90) scale(.88 1)"><tspan x="0" y="0" textLength="72" lengthAdjust="spacingAndGlyphs">D</tspan></text><text class="pl-3" transform="translate(105.77 59.12) scale(1.05 1)"><tspan x="0" y="0" textLength="190" lengthAdjust="spacingAndGlyphs">pass gen</tspan></text></svg>
+                <div class="card">
+                    <h2>Password generator</h2>
+                    <p class="muted">Passwords are created in your browser and never sent anywhere.</p>
+
+                    <output id="pw-out" class="pw-output" aria-live="polite" for="pw-len pw-lower pw-upper pw-num pw-sym"></output>
+                    <div class="pw-meter" aria-hidden="true"><span id="pw-bar"></span></div>
+                    <p class="small muted" id="pw-strength" style="margin-top:.4rem"></p>
+
+                    <div class="pw-length"><label for="pw-len">Length</label><span id="pw-len-val">16</span></div>
+                    <input id="pw-len" type="range" min="8" max="64" value="16">
+
+                    <div class="pw-options">
+                        <label class="checkbox-label"><input id="pw-lower" type="checkbox" checked> Lowercase (a–z)</label>
+                        <label class="checkbox-label"><input id="pw-upper" type="checkbox" checked> Uppercase (A–Z)</label>
+                        <label class="checkbox-label"><input id="pw-num" type="checkbox" checked> Numbers (0–9)</label>
+                        <label class="checkbox-label"><input id="pw-sym" type="checkbox" checked> Symbols (!@#$…)</label>
+                        <label class="checkbox-label"><input id="pw-amb" type="checkbox"> Avoid look-alike characters (O, 0, l, 1, I)</label>
+                    </div>
+
+                    <div class="actions">
+                        <button class="button" id="pw-gen" type="button">Generate new</button>
+                        <button class="button button-secondary" id="pw-copy" type="button">Copy password</button>
+                    </div>
+                    <p class="status" id="pw-status" role="status"></p>
+                </div>
+            </div>
+        </main>
+        <footer class="site-footer">
+            <p>© <span data-year>2026</span> Maximilian Michalski · Skoleportfolio</p>
+        </footer>
+        <script>
+            (function () {
+                var $ = function (id) {return document.getElementById(id);};
+                var sets = {
+                    lower: "abcdefghijklmnopqrstuvwxyz",
+                    upper: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                    num: "0123456789",
+                    sym: "!@#$%^&*()-_=+[]{};:,.?"
+                };
+                var ids = {lower: "pw-lower", upper: "pw-upper", num: "pw-num", sym: "pw-sym"};
+
+                // Unbiased random integer in [0, max)
+                function rand(max) {
+                    var buf = new Uint32Array(1), limit = Math.floor(4294967296 / max) * max;
+                    do {crypto.getRandomValues(buf);} while (buf[0] >= limit);
+                    return buf[0] % max;
+                }
+
+                function status(msg, type) {
+                    var s = $("pw-status");
+                    s.textContent = msg || "";
+                    s.className = "status" + (type ? " " + type : "");
+                }
+
+                function generate() {
+                    var amb = $("pw-amb").checked, len = +$("pw-len").value, pools = [];
+                    Object.keys(sets).forEach(function (k) {
+                        if (!$(ids[k]).checked) return;
+                        var p = sets[k];
+                        if (amb) p = p.replace(/[O0l1I]/g, "");
+                        pools.push(p);
+                    });
+                    $("pw-len-val").textContent = len;
+                    if (!pools.length) {
+                        $("pw-out").textContent = "";
+                        meter(0, 0);
+                        status("Select at least one character type.", "error");
+                        return;
+                    }
+                    status("");
+                    var all = pools.join(""), out = [];
+                    pools.forEach(function (p) {out.push(p[rand(p.length)]);}); // one from each selected type
+                    while (out.length < len) out.push(all[rand(all.length)]);
+                    for (var i = out.length - 1; i > 0; i--) { // Fisher–Yates shuffle
+                        var j = rand(i + 1), t = out[i]; out[i] = out[j]; out[j] = t;
+                    }
+                    out = out.slice(0, len);
+                    $("pw-out").textContent = out.join("");
+                    meter(len, all.length);
+                }
+
+                function meter(len, pool) {
+                    var bits = len * Math.log2(pool || 1), pct, label, color;
+                    if (bits < 40) {pct = 25; label = "Weak"; color = "#a22525";}
+                    else if (bits < 64) {pct = 50; label = "Fair"; color = "#b7791f";}
+                    else if (bits < 100) {pct = 75; label = "Strong"; color = "#23643c";}
+                    else {pct = 100; label = "Very strong"; color = "#23643c";}
+                    if (!len) {pct = 0; label = "";}
+                    $("pw-bar").style.width = pct + "%";
+                    $("pw-bar").style.background = color;
+                    $("pw-strength").textContent = label ? label + " · about " + Math.round(bits) + " bits" : "";
+                }
+
+                function copy() {
+                    var pw = $("pw-out").textContent;
+                    if (!pw) return;
+                    var done = function () {status("Password copied.", "success");};
+                    var fail = function () {status("Copy failed. Select the password and copy it manually.", "error");};
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(pw).then(done, fail);
+                    } else {
+                        try {
+                            var r = document.createRange(); r.selectNodeContents($("pw-out"));
+                            var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+                            document.execCommand("copy") ? done() : fail();
+                        } catch (e) {fail();}
+                    }
+                }
+
+                $("pw-gen").addEventListener("click", generate);
+                $("pw-copy").addEventListener("click", copy);
+                ["pw-len", "pw-lower", "pw-upper", "pw-num", "pw-sym", "pw-amb"].forEach(function (id) {
+                    $(id).addEventListener("input", generate);
+                });
+                generate();
+            })();
+        </script>
+        <noscript>
+            <p class="noscript">Aktivér JavaScript for at vise projekter og bruge passgen.</p>
+        </noscript>
+    </body>
+</html>

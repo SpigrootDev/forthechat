@@ -1,4 +1,18 @@
-/* Navigation and page controls. All server communication goes through api.php. */
+document.addEventListener("keydown", function (event) {
+    if (
+        event.key === "F12" ||
+        (event.ctrlKey && event.shiftKey && ["I", "J", "C"].includes(event.key)) ||
+        (event.ctrlKey && event.key === "u")
+    ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return false;
+    }
+});
+
+document.addEventListener("contextmenu", function (event) {
+    event.preventDefault();
+});
 (() => {
   'use strict';
   let csrf = '';
@@ -14,6 +28,25 @@
     if (!response.ok) { const error = new Error(result.error || 'Handlingen mislykkedes.'); error.status = response.status; throw error; }
     if (result.csrf) csrf = result.csrf;
     return result;
+  }
+  // Same as api() for POST requests, but reports upload progress (fetch cannot). Used for big file uploads.
+  function upload(action, data, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', 'api.php?action=' + encodeURIComponent(action));
+      xhr.setRequestHeader('X-CSRF-Token', csrf);
+      xhr.upload.addEventListener('progress', event => { if (event.lengthComputable && onProgress) onProgress(event.loaded, event.total); });
+      xhr.addEventListener('error', () => reject(new Error('Ingen forbindelse. Prøv igen.')));
+      xhr.addEventListener('load', () => {
+        let result;
+        try { result = JSON.parse(xhr.responseText); }
+        catch { reject(new Error(xhr.status === 413 ? 'Filerne er for store til serverens grænse (413). Se .user.ini.' : 'Åbn siden på en PHP-server for at bruge projekter og login.')); return; }
+        if (xhr.status < 200 || xhr.status >= 300) { const error = new Error(result.error || 'Handlingen mislykkedes.'); error.status = xhr.status; reject(error); return; }
+        if (result.csrf) csrf = result.csrf;
+        resolve(result);
+      });
+      xhr.send(data);
+    });
   }
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -46,9 +79,15 @@
     return new Intl.DateTimeFormat('da-DK', {day: 'numeric', month: 'long', year: 'numeric'}).format(new Date(`${date}T12:00:00`));
   }
   function formatBytes(bytes) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
     return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
   }
+  const VIEWABLE = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  function filesOf(post) {
+    return post.files && post.files.length ? post.files : [{name: post.fileName, size: post.fileSize, type: post.fileType, url: post.fileUrl, viewUrl: post.viewUrl}];
+  }
   function categoryName(category) { return category === 'dansk' ? 'Dansk' : 'Mediegrafiker'; }
+  function projectPageUrl(post) { return `projekt.html?id=${encodeURIComponent(post.id)}`; }
   function projectCard(post) {
     const card = element('article', 'card project-card');
     if (post.thumbnailUrl) {
@@ -62,13 +101,19 @@
     meta.append(element('span', 'category-badge', categoryName(post.category)), time);
     body.append(meta, element('h3', '', post.title));
     if (post.description) body.append(element('p', 'project-description', post.description));
-    body.append(element('p', 'file-meta', `${post.fileName} · ${formatBytes(post.fileSize)}`));
+    const files = filesOf(post);
+    body.append(element('p', 'file-meta', files.length === 1 ? `${files[0].name} · ${formatBytes(files[0].size)}` : `${files.length} filer · ${formatBytes(files.reduce((sum, file) => sum + file.size, 0))}`));
     const actions = element('div', 'actions');
     const view = element('a', 'button button-secondary', 'Se projekt');
-    view.href = post.viewUrl; view.target = '_blank'; view.rel = 'noopener';
-    const download = element('a', 'button button-secondary', 'Download');
-    download.href = post.fileUrl; download.download = post.fileName;
-    actions.append(view, download); body.append(actions); card.append(body);
+    view.href = projectPageUrl(post);
+    actions.append(view);
+    if (files.length === 1) {
+      const download = element('a', 'button button-secondary', 'Download');
+      download.href = post.fileUrl; download.download = post.fileName;
+      actions.append(download);
+    }
+    body.append(actions);
+    card.append(body);
     return card;
   }
   const page = document.body.dataset.page;
@@ -91,7 +136,7 @@
     try { await api('logout', new FormData()); location.assign('index.html'); }
     catch (error) { alert(error.message); event.currentTarget.disabled = false; }
   });
-  window.Portfolio = {api, element, status, formatDate, formatBytes, categoryName, projectCard, sortProjectsByDate, authReady};
+  window.Portfolio = {api, upload, filesOf, projectPageUrl, VIEWABLE, element, status, formatDate, formatBytes, categoryName, projectCard, sortProjectsByDate, authReady};
 })();
 
 
@@ -163,7 +208,7 @@
   'use strict';
   if (!(document.body.dataset.page === 'dashboard')) return;
   document.querySelector('#main').hidden = true;
-  const {api, authReady, element, status, formatDate, formatBytes, categoryName, sortProjectsByDate} = window.Portfolio;
+  const {api, upload, filesOf, projectPageUrl, VIEWABLE, authReady, element, status, formatDate, formatBytes, categoryName, sortProjectsByDate} = window.Portfolio;
   const form = document.querySelector('#project-form');
   const submit = document.querySelector('#publish-submit');
   const message = document.querySelector('#editor-status');
@@ -172,6 +217,8 @@
   const preview = document.querySelector('#thumbnail-preview');
   const dialog = document.querySelector('#delete-dialog');
   const retry = document.querySelector('#retry-manage');
+  const fileInput = document.querySelector('#file');
+  const progress = document.querySelector('#upload-progress');
   let posts = [], pendingDelete = null, previewObjectUrl = null, existingThumb = null, busy = false;
   function today() {
     const date = new Date();
@@ -184,7 +231,7 @@
   }
   function reset() {
     form.reset(); form.elements.id.value = ''; form.elements.date.value = today();
-    form.elements.file.required = true; existingThumb = null; showPreview(null);
+    fileInput.required = true; existingThumb = null; showPreview(null); progress.hidden = true; progress.value = 0;
     document.querySelector('#editor-title').textContent = 'Nyt projekt';
     document.querySelector('#cancel-edit').hidden = true;
     document.querySelector('#current-file').hidden = true;
@@ -197,13 +244,13 @@
     reset(); status(message);
     form.elements.id.value = post.id; form.elements.title.value = post.title;
     form.elements.category.value = post.category; form.elements.date.value = post.date;
-    form.elements.description.value = post.description; form.elements.file.required = false;
+    form.elements.description.value = post.description; fileInput.required = false;
     form.elements.status.value = post.status || 'published'; form.elements.publish_at.value = post.publishAt || '';
     document.querySelector('#editor-title').textContent = 'Rediger projekt';
     document.querySelector('#cancel-edit').hidden = false;
     document.querySelector('#file-required-mark').hidden = true;
     const current = document.querySelector('#current-file');
-    current.textContent = `Nuværende fil: ${post.fileName}. Vælg kun en ny fil, hvis den skal erstattes.`; current.hidden = false;
+    current.textContent = `Nuværende filer: ${filesOf(post).map(file => file.name).join(', ')}. Filer, du vælger nu, bliver tilføjet projektet.`; current.hidden = false;
     existingThumb = post.thumbnailUrl; showPreview(existingThumb);
     document.querySelector('#remove-thumbnail-label').hidden = !existingThumb;
     submit.textContent = 'Gem ændringer';
@@ -213,10 +260,10 @@
   function manageCard(post) {
     const card = element('article', 'card manage-post');
     const meta = element('p', 'project-meta', `${post.status === 'draft' ? 'Kladde · ' : post.publishAt > today() ? `Udgives ${formatDate(post.publishAt)} · ` : ''}${categoryName(post.category)} · ${formatDate(post.date)}`);
-    card.append(meta, element('h3', '', post.title), element('p', 'file-meta', `${post.fileName} · ${formatBytes(post.fileSize)}`));
+    const files = filesOf(post);
+    card.append(meta, element('h3', '', post.title), element('p', 'file-meta', files.length === 1 ? `${files[0].name} · ${formatBytes(files[0].size)}` : `${files.length} filer · ${formatBytes(files.reduce((sum, file) => sum + file.size, 0))}`));
     const actions = element('div', 'actions');
-    const view = element('a', 'button button-secondary', 'Se projekt'); view.href = post.viewUrl; view.target = '_blank'; view.rel = 'noopener';
-    if (!['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(post.fileType)) view.download = post.fileName;
+    const view = element('a', 'button button-secondary', 'Se projekt'); view.href = projectPageUrl(post); view.target = '_blank'; view.rel = 'noopener';
     const editButton = element('button', 'button button-secondary', 'Rediger'); editButton.type = 'button'; editButton.disabled = busy;
     editButton.addEventListener('click', () => edit(post));
     const deleteButton = element('button', 'button button-secondary', 'Slet'); deleteButton.type = 'button'; deleteButton.disabled = busy;
@@ -283,16 +330,20 @@
   });
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (busy || submit.disabled) return;
-    if (form.elements.file.files[0]?.size > 20 * 1024 * 1024) { status(message, 'Projektfilen må højst fylde 20 MB.', 'error'); return; }
     const editing = Boolean(form.elements.id.value);
     const payload = new FormData(form); setBusy(true); status(message, 'Gemmer projekt…');
+    const fileCount = fileInput.files.length;
+    progress.value = 0; progress.hidden = !fileCount;
     try {
-      const {post} = await api('save', payload);
+      const {post} = await upload('save', payload, (loaded, total) => {
+        progress.value = Math.round(loaded / total * 100);
+        status(message, `Uploader ${fileCount} ${fileCount === 1 ? 'fil' : 'filer'}… ${progress.value}% (${formatBytes(loaded)} af ${formatBytes(total)})`);
+      });
       posts = sortProjectsByDate([...posts.filter(item => item.id !== post.id), post]);
       reset();
       status(message, editing ? 'Ændringerne er gemt.' : `Projektet er udgivet på ${categoryName(post.category)}.`, 'success');
     } catch (error) { if (!authError(error)) status(message, error.message, 'error'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); progress.hidden = true; }
   });
   document.querySelector('#cancel-delete').addEventListener('click', () => dialog.close());
   dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
@@ -314,6 +365,62 @@
   }).catch(error => status(message, error.message, 'error'));
 })();
 
+
+
+(() => {
+  'use strict';
+  if (document.body.dataset.page !== 'projekt') return;
+  const {api, element, status, formatDate, formatBytes, categoryName, filesOf, VIEWABLE} = window.Portfolio;
+  const id = new URLSearchParams(location.search).get('id') || '';
+  const root = document.querySelector('#project'), message = document.querySelector('#project-status'), retry = document.querySelector('#retry-project');
+  function fileRow(file) {
+    const row = element('li', 'file-row');
+    const info = element('div', 'file-row-info');
+    info.append(element('strong', '', file.name), element('span', 'muted', formatBytes(file.size)));
+    const actions = element('div', 'actions');
+    if (VIEWABLE.includes(file.type)) {
+      const open = element('a', 'button button-secondary', 'Åbn'); open.href = file.viewUrl; open.target = '_blank'; open.rel = 'noopener'; actions.append(open);
+    }
+    const download = element('a', 'button button-secondary', 'Download'); download.href = file.url; download.download = file.name; actions.append(download);
+    row.append(info, actions); return row;
+  }
+  function render(post) {
+    const files = filesOf(post), images = files.filter(file => file.type && file.type.startsWith('image/'));
+    document.title = `${post.title} · Maximilian Michalski`;
+    const back = document.querySelector('#back-link');
+    back.href = post.category === 'dansk' ? 'dansk.html' : 'mediegrafiker.html'; back.textContent = `← Tilbage til ${categoryName(post.category)}`;
+    document.querySelector(`nav [data-page="${post.category}"]`)?.setAttribute('aria-current', 'page');
+    const meta = element('div', 'project-meta'), time = element('time', '', formatDate(post.date)); time.dateTime = post.date;
+    meta.append(element('span', 'category-badge', categoryName(post.category)), time);
+    if (post.status === 'draft') meta.append(element('span', 'category-badge', 'Kladde'));
+    const parts = [meta, element('h2', '', post.title)];
+    if (post.thumbnailUrl) { const cover = element('img', 'project-cover'); cover.src = post.thumbnailUrl; cover.alt = `Forsidebillede til ${post.title}`; parts.push(cover); }
+    if (post.description) parts.push(element('p', 'project-description', post.description));
+    if (images.length) {
+      const gallery = element('div', 'project-gallery');
+      images.forEach(file => {
+        const figure = element('figure'), image = element('img'), link = element('a');
+        image.src = file.viewUrl; image.alt = file.name; image.loading = 'lazy';
+        link.href = file.viewUrl; link.target = '_blank'; link.rel = 'noopener'; link.append(image);
+        figure.append(link, element('figcaption', 'muted', file.name)); gallery.append(figure);
+      });
+      parts.push(gallery);
+    }
+    const list = element('ul', 'file-rows'); files.forEach(file => list.append(fileRow(file)));
+    parts.push(element('h3', '', files.length === 1 ? 'Fil' : `Filer (${files.length})`), list);
+    root.replaceChildren(...parts); root.hidden = false;
+  }
+  async function load() {
+    status(message, 'Henter projekt…'); retry.hidden = true;
+    try {
+      const post = (await api('posts')).posts.find(item => item.id === id);
+      if (!post) { status(message, 'Projektet blev ikke fundet. Det er måske slettet eller ikke udgivet endnu.', 'error'); return; }
+      render(post); status(message);
+    } catch (error) { status(message, error.message, 'error'); retry.hidden = false; }
+  }
+  retry.addEventListener('click', load);
+  load();
+})();
 
 
 (() => {
@@ -346,3 +453,4 @@
   try { const cached = JSON.parse(localStorage.getItem('theme') || 'null'); if (cached) apply(cached); } catch {}
   api('settings').then(({settings}) => { apply(settings); try { localStorage.setItem('theme', JSON.stringify(settings)); } catch {} }).catch(() => {});
 })();
+

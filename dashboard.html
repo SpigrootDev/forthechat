@@ -6,7 +6,7 @@
         <meta name="description" content="Maximilian Michalskis portfolio med projekter i dansk og mediegrafik.">
         <title>Dashboard · Maximilian Michalski</title>
         <link rel="stylesheet" href="style.css">
-        <script src="script.js?v=6" defer></script>
+        <script src="script.js?v=9" defer></script>
         <script src="admin.js" defer></script>
     </head>
     <body data-page="dashboard">
@@ -18,6 +18,7 @@
                 <a href="index.html" data-page="home">HOME</a>
                 <a href="dansk.html" data-page="dansk">DANSK</a>
                 <a href="mediegrafiker.html" data-page="mediegrafiker">MEDIEGRAFIKER</a>
+                <a href="passgen.html" data-page="passgen">PASSGEN</a>
                 <a href="login.html" data-auth-link>LOGIN</a>
                 <button type="button" class="nav-logout" data-logout hidden>LOG UD</button>
             </nav>
@@ -62,15 +63,14 @@
                         </div>
                         <label for="description">Beskrivelse</label>
                         <textarea id="description" name="description" maxlength="20000" rows="4"></textarea>
-                        <label for="file">Projektfil
+                        <label for="file">Projektfiler
                             <span id="file-required-mark" aria-hidden="true">*</span>
                         </label>
-                        <input id="file" name="file" type="file"
-                            accept=".pdf,.docx,.pptx,.xlsx,.txt,.jpg,.jpeg,.png,.gif,.webp,.ai,.psd"
+                        <input id="file" name="files[]" type="file" multiple
                             required
                             aria-describedby="file-help current-file">
                         <p class="field-help" id="file-help">
-                            PDF, DOCX, PPTX, XLSX, TXT, AI eller PSD eller et billede. Maks. 20 MB.
+                            Vælg så mange filer, du vil, af alle typer og størrelser (hold Ctrl/Cmd nede for at vælge flere).
                         </p>
                         <p id="current-file" class="small" hidden>
                         </p>
@@ -102,7 +102,8 @@
                             <button class="button" id="publish-submit" type="submit" disabled>Udgiv projekt</button>
                             <button class="button button-secondary" id="cancel-edit" type="button" hidden>Annuller redigering</button>
                         </div>
-                    </form >
+                    <progress id="upload-progress" class="upload-progress" max="100" value="0" hidden></progress>
+                </form >
                     <p class="small muted">
                        Udgivne projekter er synlige for alle besøgende.
                     </p>
